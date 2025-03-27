@@ -1,0 +1,202 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 10% 98%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 210 100% 25%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 100% 25%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 220 20% 15%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 100% 35%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 210 100% 35%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Improved responsive typography */
+  h1 {
+    @apply text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold;
+  }
+
+  h2 {
+    @apply text-2xl sm:text-3xl md:text-4xl font-bold;
+  }
+
+  h3 {
+    @apply text-xl sm:text-2xl font-bold;
+  }
+
+  p {
+    @apply text-base sm:text-lg;
+  }
+}
+
+.prose img {
+  @apply rounded-lg mx-auto my-4;
+}
+
+.prose a {
+  @apply text-primary hover:text-primary/80 transition-colors;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 80px; /* Adjust for fixed header */
+}
+
+/* Animation keyframes */
+@keyframes float {
+  0% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+@keyframes float-delay {
+  0% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--primary), 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 15px rgba(var(--primary), 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--primary), 0);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-float-delay {
+  animation: float 3s ease-in-out infinite;
+  animation-delay: 1.5s;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 30s linear infinite; /* Slowed down from 20s to 30s */
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s infinite;
+}
+
+/* Gradient text */
+.text-gradient {
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-image: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--accent)));
+}
+
+/* Section spacing */
+section {
+  @apply py-12; /* Reduced from py-20 or py-16 */
+}
+
+.section-spacing {
+  @apply py-12; /* Consistent spacing class */
+}
+
+/* Mobile responsiveness improvements */
+@media (max-width: 640px) {
+  .container {
+    @apply px-4;
+  }
+
+  section {
+    @apply py-8;
+  }
+
+  .card-content-mobile {
+    @apply p-4;
+  }
+}
+
