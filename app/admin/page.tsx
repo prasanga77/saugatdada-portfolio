@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,12 +28,12 @@ import {
   PenTool,
   Upload,
   ImageIcon,
-  Users,
-  Stethoscope,
-  FileSpreadsheet,
-  LineChart,
-  Microscope,
   MapPin,
+  Home,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  Settings,
 } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -47,6 +46,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Switch } from "@/components/ui/switch"
 import {
   getMessages,
   updateMessageReadStatus,
@@ -79,8 +79,8 @@ import {
   addBlogPost,
   updateBlogPost,
   deleteBlogPost,
-  loginAdmin,
-  logoutAdmin,
+  getSectionVisibility,
+  updateSectionVisibility,
   type MessageData,
   type HeroData,
   type AboutData,
@@ -90,17 +90,16 @@ import {
   type TrainingData,
   type SkillData,
   type BlogPostData,
-} from "@/lib/firebase-service"
+  type SectionVisibilitySettings,
+} from "@/lib/mongodb-service"
+import { signOut } from "next-auth/react"
 
 export default function AdminPage() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [loginError, setLoginError] = useState("")
   const [messages, setMessages] = useState<MessageData[]>([])
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState("messages")
   const [isSaving, setIsSaving] = useState(false)
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   // Hero section state
   const [heroData, setHeroData] = useState<HeroData>({
@@ -154,55 +153,31 @@ export default function AdminPage() {
   const [isBlogPostDialogOpen, setIsBlogPostDialogOpen] = useState(false)
   const [richText, setRichText] = useState("")
 
+  // Section visibility state
+  const [sectionVisibility, setSectionVisibility] = useState<SectionVisibilitySettings>({
+    hero: true,
+    about: true,
+    experience: true,
+    education: true,
+    publications: true,
+    trainings: true,
+    skills: true,
+    blog: true,
+    contact: true,
+  })
+  const [sectionVisibilityLoading, setSectionVisibilityLoading] = useState(false)
+
   // File Upload ref
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Then, in the handleLogin function, add a check for Firebase availability
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoginError("")
-    setLoading(true)
-
-    try {
-      // Always allow demo login regardless of Firebase availability
-      if (email === "admin@example.com" && password === "password") {
-        setIsAuthenticated(true)
-        setLoading(false)
-        return
-      }
-
-      // Otherwise try Firebase login
-      try {
-        await loginAdmin(email, password)
-        setIsAuthenticated(true)
-      } catch (error: any) {
-        console.error("Login error:", error)
-
-        // If Firebase auth fails, try demo credentials as fallback
-        if (email === "admin@example.com" && password === "password") {
-          setIsAuthenticated(true)
-        } else {
-          throw error // Re-throw to be caught by outer catch
-        }
-      }
-    } catch (error: any) {
-      console.error("Login failed:", error)
-      setLoginError(
-        error.message ||
-          "Firebase services are not available. Please use demo credentials: admin@example.com / password",
-      )
-    } finally {
-      setLoading(false)
-    }
+  // Function to trigger a refresh of the frontend
+  const triggerFrontendRefresh = () => {
+    // Dispatch a storage event to notify other tabs/windows
+    window.dispatchEvent(new Event("storage"))
   }
 
   const handleLogout = async () => {
-    try {
-      await logoutAdmin()
-      setIsAuthenticated(false)
-    } catch (error) {
-      console.error("Logout error:", error)
-    }
+    await signOut({ callbackUrl: '/auth/signin' })
   }
 
   // Message functions
@@ -221,20 +196,16 @@ export default function AdminPage() {
   const markAsRead = async (id: string, currentStatus: boolean) => {
     try {
       await updateMessageReadStatus(id, !currentStatus)
-
-      // Update local state
       setMessages(messages.map((msg) => (msg.id === id ? { ...msg, read: !currentStatus } : msg)))
     } catch (error) {
       console.error("Error updating message status:", error)
     }
   }
 
-  // Add the deleteMessage function
   const handleDeleteMessage = async (id: string) => {
     if (window.confirm("Are you sure you want to delete this message?")) {
       try {
         await deleteMessage(id)
-        // Update local state by removing the deleted message
         setMessages(messages.filter((msg) => msg.id !== id))
         alert("Message deleted successfully!")
       } catch (error) {
@@ -261,6 +232,7 @@ export default function AdminPage() {
     setIsSaving(true)
     try {
       await updateHeroData(heroData)
+      triggerFrontendRefresh()
       alert("Hero section updated successfully!")
     } catch (error) {
       console.error("Error saving hero data:", error)
@@ -273,8 +245,6 @@ export default function AdminPage() {
   const handleHeroImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      // In a real app, you would upload the file to a storage service like Firebase Storage
-      // Here we're just using a placeholder for demonstration
       const reader = new FileReader()
       reader.onload = () => {
         setHeroData({
@@ -303,6 +273,7 @@ export default function AdminPage() {
     setIsSaving(true)
     try {
       await updateAboutData(aboutData)
+      triggerFrontendRefresh()
       alert("About section updated successfully!")
     } catch (error) {
       console.error("Error saving about data:", error)
@@ -348,11 +319,9 @@ export default function AdminPage() {
     setIsSaving(true)
     try {
       if (currentExperience.id) {
-        // Update existing experience
         await updateExperience(currentExperience.id, currentExperience)
         setExperiences(experiences.map((exp) => (exp.id === currentExperience.id ? currentExperience : exp)))
       } else {
-        // Add new experience
         const newId = await addExperience({
           ...currentExperience,
           order: experiences.length + 1,
@@ -360,6 +329,7 @@ export default function AdminPage() {
         setExperiences([...experiences, { ...currentExperience, id: newId }])
       }
       setIsExperienceDialogOpen(false)
+      triggerFrontendRefresh()
       alert(currentExperience.id ? "Experience updated successfully!" : "Experience added successfully!")
     } catch (error) {
       console.error("Error saving experience:", error)
@@ -374,6 +344,7 @@ export default function AdminPage() {
       try {
         await deleteExperience(id)
         setExperiences(experiences.filter((exp) => exp.id !== id))
+        triggerFrontendRefresh()
         alert("Experience deleted successfully!")
       } catch (error) {
         console.error("Error deleting experience:", error)
@@ -417,11 +388,9 @@ export default function AdminPage() {
     setIsSaving(true)
     try {
       if (currentEducation.id) {
-        // Update existing education
         await updateEducation(currentEducation.id, currentEducation)
         setEducation(education.map((edu) => (edu.id === currentEducation.id ? currentEducation : edu)))
       } else {
-        // Add new education
         const newId = await addEducation({
           ...currentEducation,
           order: education.length + 1,
@@ -429,6 +398,7 @@ export default function AdminPage() {
         setEducation([...education, { ...currentEducation, id: newId }])
       }
       setIsEducationDialogOpen(false)
+      triggerFrontendRefresh()
       alert(currentEducation.id ? "Education updated successfully!" : "Education added successfully!")
     } catch (error) {
       console.error("Error saving education:", error)
@@ -443,6 +413,7 @@ export default function AdminPage() {
       try {
         await deleteEducation(id)
         setEducation(education.filter((edu) => edu.id !== id))
+        triggerFrontendRefresh()
         alert("Education deleted successfully!")
       } catch (error) {
         console.error("Error deleting education:", error)
@@ -486,11 +457,9 @@ export default function AdminPage() {
     setIsSaving(true)
     try {
       if (currentPublication.id) {
-        // Update existing publication
         await updatePublication(currentPublication.id, currentPublication)
         setPublications(publications.map((pub) => (pub.id === currentPublication.id ? currentPublication : pub)))
       } else {
-        // Add new publication
         const newId = await addPublication({
           ...currentPublication,
           order: publications.length + 1,
@@ -498,6 +467,7 @@ export default function AdminPage() {
         setPublications([...publications, { ...currentPublication, id: newId }])
       }
       setIsPublicationDialogOpen(false)
+      triggerFrontendRefresh()
       alert(currentPublication.id ? "Publication updated successfully!" : "Publication added successfully!")
     } catch (error) {
       console.error("Error saving publication:", error)
@@ -512,6 +482,7 @@ export default function AdminPage() {
       try {
         await deletePublication(id)
         setPublications(publications.filter((pub) => pub.id !== id))
+        triggerFrontendRefresh()
         alert("Publication deleted successfully!")
       } catch (error) {
         console.error("Error deleting publication:", error)
@@ -558,11 +529,9 @@ export default function AdminPage() {
     setIsSaving(true)
     try {
       if (currentTraining.id) {
-        // Update existing training
         await updateTraining(currentTraining.id, currentTraining)
         setTrainings(trainings.map((training) => (training.id === currentTraining.id ? currentTraining : training)))
       } else {
-        // Add new training
         const newId = await addTraining({
           ...currentTraining,
           order: trainings.length + 1,
@@ -570,6 +539,7 @@ export default function AdminPage() {
         setTrainings([...trainings, { ...currentTraining, id: newId }])
       }
       setIsTrainingDialogOpen(false)
+      triggerFrontendRefresh()
       alert(currentTraining.id ? "Training updated successfully!" : "Training added successfully!")
     } catch (error) {
       console.error("Error saving training:", error)
@@ -584,6 +554,7 @@ export default function AdminPage() {
       try {
         await deleteTraining(id)
         setTrainings(trainings.filter((training) => training.id !== id))
+        triggerFrontendRefresh()
         alert("Training deleted successfully!")
       } catch (error) {
         console.error("Error deleting training:", error)
@@ -627,11 +598,9 @@ export default function AdminPage() {
     setIsSaving(true)
     try {
       if (currentSkill.id) {
-        // Update existing skill
         await updateSkill(currentSkill.id, currentSkill)
         setSkills(skills.map((skill) => (skill.id === currentSkill.id ? currentSkill : skill)))
       } else {
-        // Add new skill
         const newId = await addSkill({
           ...currentSkill,
           order:
@@ -642,6 +611,7 @@ export default function AdminPage() {
         setSkills([...skills, { ...currentSkill, id: newId }])
       }
       setIsSkillDialogOpen(false)
+      triggerFrontendRefresh()
       alert(currentSkill.id ? "Skill updated successfully!" : "Skill added successfully!")
     } catch (error) {
       console.error("Error saving skill:", error)
@@ -656,6 +626,7 @@ export default function AdminPage() {
       try {
         await deleteSkill(id)
         setSkills(skills.filter((skill) => skill.id !== id))
+        triggerFrontendRefresh()
         alert("Skill deleted successfully!")
       } catch (error) {
         console.error("Error deleting skill:", error)
@@ -699,7 +670,6 @@ export default function AdminPage() {
     setIsSaving(true)
     try {
       if (currentBlogPost.id) {
-        // Update existing blog post
         await updateBlogPost(currentBlogPost.id, {
           ...currentBlogPost,
           content: richText,
@@ -708,7 +678,6 @@ export default function AdminPage() {
           blogPosts.map((post) => (post.id === currentBlogPost.id ? { ...currentBlogPost, content: richText } : post)),
         )
       } else {
-        // Add new blog post
         const newId = await addBlogPost({
           ...currentBlogPost,
           content: richText,
@@ -725,6 +694,7 @@ export default function AdminPage() {
         ])
       }
       setIsBlogPostDialogOpen(false)
+      triggerFrontendRefresh()
       alert(currentBlogPost.id ? "Blog post updated successfully!" : "Blog post added successfully!")
     } catch (error) {
       console.error("Error saving blog post:", error)
@@ -739,6 +709,7 @@ export default function AdminPage() {
       try {
         await deleteBlogPost(id)
         setBlogPosts(blogPosts.filter((post) => post.id !== id))
+        triggerFrontendRefresh()
         alert("Blog post deleted successfully!")
       } catch (error) {
         console.error("Error deleting blog post:", error)
@@ -770,7 +741,6 @@ export default function AdminPage() {
   const handleBlogImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file && currentBlogPost) {
-      // In a real app, you would upload the file to a storage service like Firebase Storage
       const reader = new FileReader()
       reader.onload = () => {
         setCurrentBlogPost({
@@ -782,29 +752,75 @@ export default function AdminPage() {
     }
   }
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      if (activeTab === "messages") {
-        fetchMessages()
-      } else if (activeTab === "hero") {
-        fetchHeroData()
-      } else if (activeTab === "about") {
-        fetchAboutData()
-      } else if (activeTab === "experience") {
-        fetchExperiences()
-      } else if (activeTab === "education") {
-        fetchEducation()
-      } else if (activeTab === "publications") {
-        fetchPublications()
-      } else if (activeTab === "trainings") {
-        fetchTrainings()
-      } else if (activeTab === "skills") {
-        fetchSkills()
-      } else if (activeTab === "blog") {
-        fetchBlogPosts()
-      }
+  // Section visibility functions
+  const fetchSectionVisibility = async () => {
+    setSectionVisibilityLoading(true)
+    try {
+      const settings = await getSectionVisibility()
+      setSectionVisibility(settings)
+    } catch (error) {
+      console.error("Error fetching section visibility settings:", error)
+    } finally {
+      setSectionVisibilityLoading(false)
     }
-  }, [isAuthenticated, activeTab])
+  }
+
+  const handleSaveSectionVisibility = async () => {
+    setIsSaving(true)
+    try {
+      await updateSectionVisibility(sectionVisibility)
+      triggerFrontendRefresh()
+      alert("Section visibility settings updated successfully!")
+    } catch (error) {
+      console.error("Error saving section visibility settings:", error)
+      alert("Failed to update section visibility settings. Please try again.")
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // Function to manually refresh data - to be called only by user interaction
+  const refreshCurrentSection = () => {
+    // Fetch data for the current active tab
+    switch (activeTab) {
+      case "messages":
+        fetchMessages();
+        break;
+      case "hero":
+        fetchHeroData();
+        break;
+      case "about":
+        fetchAboutData();
+        break;
+      case "experience":
+        fetchExperiences();
+        break;
+      case "education":
+        fetchEducation();
+        break;
+      case "publications":
+        fetchPublications();
+        break;
+      case "trainings":
+        fetchTrainings();
+        break;
+      case "skills":
+        fetchSkills();
+        break;
+      case "blog":
+        fetchBlogPosts();
+        break;
+      case "settings":
+        fetchSectionVisibility();
+        break;
+      default:
+        console.warn(`No refresh handler for tab: ${activeTab}`);
+    }
+  }
+
+  useEffect(() => {
+    refreshCurrentSection()
+  }, [activeTab, refreshTrigger])
 
   // Helper function to format date
   const formatDate = (date: string | { toDate: () => Date } | Date | undefined) => {
@@ -821,135 +837,83 @@ export default function AdminPage() {
     return "Unknown date"
   }
 
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-muted/30 p-4">
-        <Card className="w-full max-w-md border-0 shadow-lg">
-          <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-bold">Admin Login</CardTitle>
-            <CardDescription>Enter your credentials to access the admin dashboard</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loginError && (
-              <Alert variant="destructive" className="mb-4">
-                <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Error</AlertTitle>
-                <AlertDescription>{loginError}</AlertDescription>
-              </Alert>
-            )}
-
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="admin@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? (
-                  <span className="flex items-center">
-                    <svg
-                      className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      ></circle>
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
-                    Logging in...
-                  </span>
-                ) : (
-                  <span className="flex items-center">
-                    <Lock className="mr-2 h-4 w-4" /> Login
-                  </span>
-                )}
-              </Button>
-            </form>
-          </CardContent>
-          <CardFooter className="text-center text-sm text-muted-foreground">
-            <p>Demo credentials: admin@example.com / password</p>
-          </CardFooter>
-        </Card>
-      </div>
-    )
-  }
-
   return (
     <div className="min-h-screen bg-muted/30 p-4">
       <div className="container mx-auto py-6">
-        <div className="flex flex-col sm:flex-row justify-between items-center mb-8 gap-4">
-          <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-          <Button variant="outline" onClick={handleLogout}>
-            Logout
-          </Button>
+        {/* Header with improved mobile layout */}
+        <div className="flex flex-col sm:flex-row justify-between items-center mb-8 gap-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md">
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl md:text-3xl font-bold">Admin Dashboard</h1>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={refreshCurrentSection}
+              title="Refresh data"
+              className="hidden sm:flex"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <Button variant="outline" className="flex-1 sm:flex-initial" onClick={() => window.open("/", "_blank")}>
+              <Home className="mr-2 h-4 w-4" /> View Site
+            </Button>
+            <Button variant="outline" className="flex-1 sm:flex-initial" onClick={handleLogout}>
+              Logout
+            </Button>
+          </div>
         </div>
 
         <Tabs defaultValue="messages" value={activeTab} onValueChange={setActiveTab}>
-          <div className="overflow-x-auto">
-            <TabsList className="mb-8 flex flex-nowrap min-w-max">
-              <TabsTrigger value="messages" className="flex items-center gap-1">
-                <Mail className="h-4 w-4" /> Messages
-              </TabsTrigger>
-              <TabsTrigger value="hero" className="flex items-center gap-1">
-                <ImageIcon className="h-4 w-4" /> Hero
-              </TabsTrigger>
-              <TabsTrigger value="about" className="flex items-center gap-1">
-                <FileText className="h-4 w-4" /> About
-              </TabsTrigger>
-              <TabsTrigger value="experience" className="flex items-center gap-1">
-                <Briefcase className="h-4 w-4" /> Experience
-              </TabsTrigger>
-              <TabsTrigger value="education" className="flex items-center gap-1">
-                <GraduationCap className="h-4 w-4" /> Education
-              </TabsTrigger>
-              <TabsTrigger value="publications" className="flex items-center gap-1">
-                <Award className="h-4 w-4" /> Publications
-              </TabsTrigger>
-              <TabsTrigger value="trainings" className="flex items-center gap-1">
-                <BookOpen className="h-4 w-4" /> Trainings
-              </TabsTrigger>
-              <TabsTrigger value="skills" className="flex items-center gap-1">
-                <Star className="h-4 w-4" /> Skills
-              </TabsTrigger>
-              <TabsTrigger value="blog" className="flex items-center gap-1">
-                <PenTool className="h-4 w-4" /> Blog
-              </TabsTrigger>
-            </TabsList>
+          {/* Mobile-friendly tabs */}
+          <div className="mb-6 bg-white dark:bg-gray-800 p-2 rounded-lg shadow-md">
+            <div className="overflow-x-auto">
+              <TabsList className="flex flex-nowrap min-w-max w-full justify-start sm:justify-center">
+                <TabsTrigger value="messages" className="flex items-center gap-1 whitespace-nowrap">
+                  <Mail className="h-4 w-4" /> <span className="hidden sm:inline">Messages</span>
+                </TabsTrigger>
+                <TabsTrigger value="hero" className="flex items-center gap-1 whitespace-nowrap">
+                  <ImageIcon className="h-4 w-4" /> <span className="hidden sm:inline">Hero</span>
+                </TabsTrigger>
+                <TabsTrigger value="about" className="flex items-center gap-1 whitespace-nowrap">
+                  <FileText className="h-4 w-4" /> <span className="hidden sm:inline">About</span>
+                </TabsTrigger>
+                <TabsTrigger value="experience" className="flex items-center gap-1 whitespace-nowrap">
+                  <Briefcase className="h-4 w-4" /> <span className="hidden sm:inline">Experience</span>
+                </TabsTrigger>
+                <TabsTrigger value="education" className="flex items-center gap-1 whitespace-nowrap">
+                  <GraduationCap className="h-4 w-4" /> <span className="hidden sm:inline">Education</span>
+                </TabsTrigger>
+                <TabsTrigger value="publications" className="flex items-center gap-1 whitespace-nowrap">
+                  <Award className="h-4 w-4" /> <span className="hidden sm:inline">Publications</span>
+                </TabsTrigger>
+                <TabsTrigger value="trainings" className="flex items-center gap-1 whitespace-nowrap">
+                  <BookOpen className="h-4 w-4" /> <span className="hidden sm:inline">Trainings</span>
+                </TabsTrigger>
+                <TabsTrigger value="skills" className="flex items-center gap-1 whitespace-nowrap">
+                  <Star className="h-4 w-4" /> <span className="hidden sm:inline">Skills</span>
+                </TabsTrigger>
+                <TabsTrigger value="blog" className="flex items-center gap-1 whitespace-nowrap">
+                  <PenTool className="h-4 w-4" /> <span className="hidden sm:inline">Blog</span>
+                </TabsTrigger>
+                <TabsTrigger value="settings" className="flex items-center gap-1 whitespace-nowrap">
+                  <Settings className="h-4 w-4" /> <span className="hidden sm:inline">Settings</span>
+                </TabsTrigger>
+              </TabsList>
+            </div>
           </div>
 
           {/* Messages Tab */}
           <TabsContent value="messages">
             <Card>
-              <CardHeader>
-                <CardTitle>Contact Messages</CardTitle>
-                <CardDescription>View and manage messages from the contact form</CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
+                <div>
+                  <CardTitle>Contact Messages</CardTitle>
+                  <CardDescription>View and manage messages from the contact form</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={refreshCurrentSection}>
+                  <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+                </Button>
               </CardHeader>
               <CardContent>
                 {loading ? (
@@ -985,18 +949,18 @@ export default function AdminPage() {
                         className={`border ${message.read ? "border-gray-200" : "border-primary"}`}
                       >
                         <CardContent className="p-4">
-                          <div className="flex justify-between items-start mb-2">
+                          <div className="flex flex-col sm:flex-row justify-between items-start mb-2 gap-2">
                             <div>
-                              <h3 className="font-bold text-lg flex items-center">
+                              <h3 className="font-bold text-lg flex items-center flex-wrap gap-2">
                                 {message.subject}
-                                {!message.read && <Badge className="ml-2 bg-primary text-white">New</Badge>}
+                                {!message.read && <Badge className="bg-primary text-white">New</Badge>}
                               </h3>
                               <div className="flex items-center text-sm text-muted-foreground">
                                 <Mail className="h-4 w-4 mr-1" />
                                 <span>{message.email}</span>
                               </div>
                             </div>
-                            <div className="flex items-center space-x-2">
+                            <div className="flex items-center space-x-2 self-end sm:self-start">
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -1038,9 +1002,14 @@ export default function AdminPage() {
           {/* Hero Tab */}
           <TabsContent value="hero">
             <Card>
-              <CardHeader>
-                <CardTitle>Hero Section</CardTitle>
-                <CardDescription>Edit your hero section content and image</CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
+                <div>
+                  <CardTitle>Hero Section</CardTitle>
+                  <CardDescription>Edit your hero section content and image</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={refreshCurrentSection}>
+                  <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+                </Button>
               </CardHeader>
               <CardContent className="space-y-6">
                 {heroLoading ? (
@@ -1186,9 +1155,14 @@ export default function AdminPage() {
           {/* About Tab */}
           <TabsContent value="about">
             <Card>
-              <CardHeader>
-                <CardTitle>About Section</CardTitle>
-                <CardDescription>Edit your bio and professional highlights</CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
+                <div>
+                  <CardTitle>About Section</CardTitle>
+                  <CardDescription>Edit your bio and professional highlights</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={refreshCurrentSection}>
+                  <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+                </Button>
               </CardHeader>
               <CardContent className="space-y-6">
                 {aboutLoading ? (
@@ -1245,7 +1219,7 @@ export default function AdminPage() {
                         ))}
                       </div>
 
-                      <div className="flex gap-2 mt-2">
+                      <div className="flex flex-col sm:flex-row gap-2 mt-2">
                         <Input
                           placeholder="Add a new highlight..."
                           value={highlightInput}
@@ -1256,6 +1230,7 @@ export default function AdminPage() {
                               addHighlight()
                             }
                           }}
+                          className="flex-1"
                         />
                         <Button onClick={addHighlight} type="button">
                           Add
@@ -1303,14 +1278,19 @@ export default function AdminPage() {
           {/* Experience Tab */}
           <TabsContent value="experience">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
                 <div>
                   <CardTitle>Experience Management</CardTitle>
                   <CardDescription>Add, edit, or remove professional experiences</CardDescription>
                 </div>
-                <Button onClick={openNewExperienceDialog} className="flex items-center gap-1">
-                  <Plus className="h-4 w-4" /> Add Experience
-                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={refreshCurrentSection}>
+                    <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+                  </Button>
+                  <Button onClick={openNewExperienceDialog} className="flex items-center gap-1">
+                    <Plus className="h-4 w-4" /> Add
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 {experienceLoading ? (
@@ -1341,7 +1321,7 @@ export default function AdminPage() {
                 ) : (
                   <div className="space-y-4">
                     {experiences.map((experience) => (
-                      <Card key={experience.id} className="overflow-hidden">
+                      <Card key={experience.id} className="overflow-hidden hover:shadow-md transition-shadow">
                         <CardContent className="p-0">
                           <div className="flex flex-col sm:flex-row">
                             <div className="p-4 sm:p-6 flex-1">
@@ -1379,7 +1359,7 @@ export default function AdminPage() {
 
             {/* Experience Dialog */}
             <Dialog open={isExperienceDialogOpen} onOpenChange={setIsExperienceDialogOpen}>
-              <DialogContent className="sm:max-w-[550px]">
+              <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>{currentExperience?.id ? "Edit Experience" : "Add New Experience"}</DialogTitle>
                   <DialogDescription>
@@ -1455,14 +1435,19 @@ export default function AdminPage() {
           {/* Education Tab */}
           <TabsContent value="education">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
                 <div>
                   <CardTitle>Education Management</CardTitle>
                   <CardDescription>Add, edit, or remove educational qualifications</CardDescription>
                 </div>
-                <Button onClick={openNewEducationDialog} className="flex items-center gap-1">
-                  <Plus className="h-4 w-4" /> Add Education
-                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={refreshCurrentSection}>
+                    <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+                  </Button>
+                  <Button onClick={openNewEducationDialog} className="flex items-center gap-1">
+                    <Plus className="h-4 w-4" /> Add
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 {educationLoading ? (
@@ -1493,7 +1478,7 @@ export default function AdminPage() {
                 ) : (
                   <div className="space-y-4">
                     {education.map((edu) => (
-                      <Card key={edu.id} className="overflow-hidden">
+                      <Card key={edu.id} className="overflow-hidden hover:shadow-md transition-shadow">
                         <CardContent className="p-0">
                           <div className="flex flex-col sm:flex-row">
                             <div className="p-4 sm:p-6 flex-1">
@@ -1539,7 +1524,7 @@ export default function AdminPage() {
 
             {/* Education Dialog */}
             <Dialog open={isEducationDialogOpen} onOpenChange={setIsEducationDialogOpen}>
-              <DialogContent className="sm:max-w-[550px]">
+              <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>{currentEducation?.id ? "Edit Education" : "Add New Education"}</DialogTitle>
                   <DialogDescription>
@@ -1614,14 +1599,19 @@ export default function AdminPage() {
           {/* Publications Tab */}
           <TabsContent value="publications">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
                 <div>
                   <CardTitle>Publications Management</CardTitle>
                   <CardDescription>Add, edit, or remove publications and presentations</CardDescription>
                 </div>
-                <Button onClick={openNewPublicationDialog} className="flex items-center gap-1">
-                  <Plus className="h-4 w-4" /> Add Publication
-                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={refreshCurrentSection}>
+                    <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+                  </Button>
+                  <Button onClick={openNewPublicationDialog} className="flex items-center gap-1">
+                    <Plus className="h-4 w-4" /> Add
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 {publicationsLoading ? (
@@ -1650,31 +1640,29 @@ export default function AdminPage() {
                 ) : publications.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">No publications added yet.</div>
                 ) : (
-                  <div className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
                     {publications.map((pub) => (
-                      <Card key={pub.id} className="overflow-hidden">
+                      <Card key={pub.id} className="overflow-hidden hover:shadow-md transition-shadow">
                         <CardContent className="p-0">
-                          <div className="flex flex-col sm:flex-row">
-                            <div className="p-4 sm:p-6 flex-1">
-                              <div className="flex items-start gap-3">
-                                <Badge className="mt-1">{pub.type}</Badge>
-                                <div>
-                                  <h3 className="font-bold text-lg">{pub.title}</h3>
-                                  <p className="text-primary">{pub.event}</p>
-                                  <div className="flex flex-col sm:flex-row sm:gap-4 text-sm text-muted-foreground mt-1">
-                                    <div className="flex items-center">
-                                      <Calendar className="h-4 w-4 mr-1" />
-                                      <span>{pub.date}</span>
-                                    </div>
-                                    <div className="flex items-center">
-                                      <MapPin className="h-4 w-4 mr-1" />
-                                      <span>{pub.location}</span>
-                                    </div>
-                                  </div>
-                                </div>
+                          <div className="p-4">
+                            <div className="flex items-start gap-3 mb-3">
+                              <Badge className="mt-1">{pub.type}</Badge>
+                              <div className="flex-1">
+                                <h3 className="font-bold text-lg">{pub.title}</h3>
+                                <p className="text-primary">{pub.event}</p>
                               </div>
                             </div>
-                            <div className="flex sm:flex-col justify-end p-4 bg-muted/20">
+                            <div className="flex flex-col sm:flex-row sm:gap-4 text-sm text-muted-foreground mt-1 mb-3">
+                              <div className="flex items-center">
+                                <Calendar className="h-4 w-4 mr-1" />
+                                <span>{pub.date}</span>
+                              </div>
+                              <div className="flex items-center">
+                                <MapPin className="h-4 w-4 mr-1" />
+                                <span>{pub.location}</span>
+                              </div>
+                            </div>
+                            <div className="flex justify-end gap-2 border-t pt-3">
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -1703,7 +1691,7 @@ export default function AdminPage() {
 
             {/* Publication Dialog */}
             <Dialog open={isPublicationDialogOpen} onOpenChange={setIsPublicationDialogOpen}>
-              <DialogContent className="sm:max-w-[550px]">
+              <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>{currentPublication?.id ? "Edit Publication" : "Add New Publication"}</DialogTitle>
                   <DialogDescription>
@@ -1851,14 +1839,19 @@ export default function AdminPage() {
           {/* Trainings Tab */}
           <TabsContent value="trainings">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
                 <div>
                   <CardTitle>Trainings Management</CardTitle>
                   <CardDescription>Add, edit, or remove trainings and certifications</CardDescription>
                 </div>
-                <Button onClick={openNewTrainingDialog} className="flex items-center gap-1">
-                  <Plus className="h-4 w-4" /> Add Training
-                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={refreshCurrentSection}>
+                    <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+                  </Button>
+                  <Button onClick={openNewTrainingDialog} className="flex items-center gap-1">
+                    <Plus className="h-4 w-4" /> Add
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 {trainingsLoading ? (
@@ -1889,45 +1882,43 @@ export default function AdminPage() {
                 ) : (
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {trainings.map((training) => (
-                      <Card key={training.id} className="overflow-hidden">
-                        <CardContent className="p-0">
-                          <div className="p-4">
-                            <div className="flex items-start gap-3 mb-3">
-                              <div className="bg-primary/10 p-2 rounded-full">
-                                <Award className="h-5 w-5 text-primary" />
-                              </div>
-                              <div className="flex-1">
-                                <h3 className="font-bold text-lg line-clamp-2">{training.title}</h3>
+                      <Card key={training.id} className="overflow-hidden hover:shadow-md transition-shadow">
+                        <CardContent className="p-4">
+                          <div className="flex items-start space-x-4 mb-3">
+                            <div className="bg-primary/10 p-3 rounded-full">
+                              <Award className="h-5 w-5 text-primary" />
+                            </div>
+                            <div className="flex-1">
+                              <h3 className="font-bold text-lg">{training.title}</h3>
+                              <div className="flex flex-col text-sm text-muted-foreground mt-1">
+                                <div className="flex items-center">
+                                  <Calendar className="h-4 w-4 mr-1" />
+                                  <span>{training.date}</span>
+                                </div>
+                                <div className="flex items-center">
+                                  <MapPin className="h-4 w-4 mr-1" />
+                                  <span>{training.location}</span>
+                                </div>
                               </div>
                             </div>
-                            <div className="space-y-2 text-sm text-muted-foreground mb-4">
-                              <div className="flex items-center">
-                                <Calendar className="h-4 w-4 mr-2" />
-                                <span>{training.date}</span>
-                              </div>
-                              <div className="flex items-center">
-                                <MapPin className="h-4 w-4 mr-2" />
-                                <span>{training.location}</span>
-                              </div>
-                            </div>
-                            <div className="flex justify-end gap-2 border-t pt-3">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="flex items-center gap-1"
-                                onClick={() => openEditTrainingDialog(training)}
-                              >
-                                <Edit className="h-4 w-4" /> Edit
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="flex items-center gap-1 text-destructive"
-                                onClick={() => handleDeleteTraining(training.id!)}
-                              >
-                                <Trash className="h-4 w-4" /> Delete
-                              </Button>
-                            </div>
+                          </div>
+                          <div className="flex justify-end gap-2 border-t pt-3">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="flex items-center gap-1"
+                              onClick={() => openEditTrainingDialog(training)}
+                            >
+                              <Edit className="h-4 w-4" /> Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="flex items-center gap-1 text-destructive"
+                              onClick={() => handleDeleteTraining(training.id!)}
+                            >
+                              <Trash className="h-4 w-4" /> Delete
+                            </Button>
                           </div>
                         </CardContent>
                       </Card>
@@ -1939,7 +1930,7 @@ export default function AdminPage() {
 
             {/* Training Dialog */}
             <Dialog open={isTrainingDialogOpen} onOpenChange={setIsTrainingDialogOpen}>
-              <DialogContent className="sm:max-w-[550px]">
+              <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>{currentTraining?.id ? "Edit Training" : "Add New Training"}</DialogTitle>
                   <DialogDescription>
@@ -1956,7 +1947,7 @@ export default function AdminPage() {
                       id="title"
                       value={currentTraining?.title || ""}
                       onChange={(e) => setCurrentTraining((prev) => (prev ? { ...prev, title: e.target.value } : null))}
-                      placeholder="e.g. Health Research Proposal Development (NHRC)"
+                      placeholder="e.g. Health Research Proposal Development"
                     />
                   </div>
 
@@ -1981,6 +1972,23 @@ export default function AdminPage() {
                       placeholder="e.g. Nepal"
                     />
                   </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="icon">Icon</Label>
+                    <Select
+                      value={currentTraining?.icon || "Award"}
+                      onValueChange={(value) => setCurrentTraining((prev) => (prev ? { ...prev, icon: value } : null))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select icon" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Award">Award</SelectItem>
+                        <SelectItem value="FileText">Document</SelectItem>
+                        <SelectItem value="BookOpen">Book</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <DialogFooter>
@@ -1998,14 +2006,19 @@ export default function AdminPage() {
           {/* Skills Tab */}
           <TabsContent value="skills">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
                 <div>
                   <CardTitle>Skills Management</CardTitle>
                   <CardDescription>Add, edit, or remove technical and personal skills</CardDescription>
                 </div>
-                <Button onClick={openNewSkillDialog} className="flex items-center gap-1">
-                  <Plus className="h-4 w-4" /> Add Skill
-                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={refreshCurrentSection}>
+                    <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+                  </Button>
+                  <Button onClick={openNewSkillDialog} className="flex items-center gap-1">
+                    <Plus className="h-4 w-4" /> Add
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 {skillsLoading ? (
@@ -2034,105 +2047,94 @@ export default function AdminPage() {
                 ) : skills.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">No skills added yet.</div>
                 ) : (
-                  <div className="grid md:grid-cols-2 gap-8">
-                    {/* Technical Skills */}
+                  <div className="space-y-8">
                     <div>
-                      <h3 className="text-xl font-bold mb-4">Technical Skills</h3>
-                      <div className="space-y-6">
+                      <h3 className="text-lg font-semibold mb-4">Technical Skills</h3>
+                      <div className="grid gap-4 sm:grid-cols-2">
                         {skills
                           .filter((skill) => skill.type === "technical")
                           .map((skill) => (
-                            <div key={skill.id} className="space-y-2">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center">
-                                  <div className="bg-primary/10 p-2 rounded-full mr-3">
-                                    {skill.icon === "FileSpreadsheet" ? (
-                                      <FileSpreadsheet className="h-5 w-5 text-primary" />
-                                    ) : skill.icon === "LineChart" ? (
-                                      <LineChart className="h-5 w-5 text-primary" />
-                                    ) : skill.icon === "Microscope" ? (
-                                      <Microscope className="h-5 w-5 text-primary" />
-                                    ) : skill.icon === "Stethoscope" ? (
-                                      <Stethoscope className="h-5 w-5 text-primary" />
-                                    ) : (
+                            <Card key={skill.id} className="overflow-hidden hover:shadow-md transition-shadow">
+                              <CardContent className="p-4">
+                                <div className="flex items-start justify-between">
+                                  <div className="flex items-start space-x-3">
+                                    <div className="bg-primary/10 p-2 rounded-full">
                                       <Star className="h-5 w-5 text-primary" />
-                                    )}
+                                    </div>
+                                    <div>
+                                      <h4 className="font-medium">{skill.name}</h4>
+                                      <div className="flex items-center mt-1">
+                                        <div className="w-full bg-muted rounded-full h-2 mr-2">
+                                          <div
+                                            className="bg-primary h-2 rounded-full"
+                                            style={{ width: `${skill.level}%` }}
+                                          ></div>
+                                        </div>
+                                        <span className="text-xs text-muted-foreground">{skill.level}%</span>
+                                      </div>
+                                    </div>
                                   </div>
-                                  <span className="font-medium">{skill.name}</span>
+                                  <div className="flex">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0"
+                                      onClick={() => openEditSkillDialog(skill)}
+                                    >
+                                      <Edit className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 text-destructive"
+                                      onClick={() => handleDeleteSkill(skill.id!)}
+                                    >
+                                      <Trash className="h-4 w-4" />
+                                    </Button>
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm text-muted-foreground">{skill.level}%</span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 w-8 p-0"
-                                    onClick={() => openEditSkillDialog(skill)}
-                                  >
-                                    <Edit className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 w-8 p-0 text-destructive"
-                                    onClick={() => handleDeleteSkill(skill.id!)}
-                                  >
-                                    <Trash className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </div>
-                              <div className="w-full bg-muted rounded-full h-2.5">
-                                <div
-                                  className="bg-primary h-2.5 rounded-full"
-                                  style={{ width: `${skill.level}%` }}
-                                ></div>
-                              </div>
-                            </div>
+                              </CardContent>
+                            </Card>
                           ))}
                       </div>
                     </div>
 
-                    {/* Personal Skills */}
                     <div>
-                      <h3 className="text-xl font-bold mb-4">Personal Attributes</h3>
-                      <div className="grid gap-4">
+                      <h3 className="text-lg font-semibold mb-4">Personal Skills</h3>
+                      <div className="grid gap-4 sm:grid-cols-2">
                         {skills
                           .filter((skill) => skill.type === "personal")
                           .map((skill) => (
-                            <div
-                              key={skill.id}
-                              className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
-                            >
-                              <div className="flex items-center">
-                                <div className="bg-primary/10 p-2 rounded-full mr-3">
-                                  {skill.icon === "BookOpen" ? (
-                                    <BookOpen className="h-5 w-5 text-primary" />
-                                  ) : skill.icon === "Users" ? (
-                                    <Users className="h-5 w-5 text-primary" />
-                                  ) : (
-                                    <Star className="h-5 w-5 text-primary" />
-                                  )}
+                            <Card key={skill.id} className="overflow-hidden hover:shadow-md transition-shadow">
+                              <CardContent className="p-4">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-3">
+                                    <div className="bg-primary/10 p-2 rounded-full">
+                                      <Star className="h-5 w-5 text-primary" />
+                                    </div>
+                                    <h4 className="font-medium">{skill.name}</h4>
+                                  </div>
+                                  <div className="flex">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0"
+                                      onClick={() => openEditSkillDialog(skill)}
+                                    >
+                                      <Edit className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 text-destructive"
+                                      onClick={() => handleDeleteSkill(skill.id!)}
+                                    >
+                                      <Trash className="h-4 w-4" />
+                                    </Button>
+                                  </div>
                                 </div>
-                                <span className="font-medium">{skill.name}</span>
-                              </div>
-                              <div className="flex items-center">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0"
-                                  onClick={() => openEditSkillDialog(skill)}
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0 text-destructive"
-                                  onClick={() => handleDeleteSkill(skill.id!)}
-                                >
-                                  <Trash className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
+                              </CardContent>
+                            </Card>
                           ))}
                       </div>
                     </div>
@@ -2143,11 +2145,13 @@ export default function AdminPage() {
 
             {/* Skill Dialog */}
             <Dialog open={isSkillDialogOpen} onOpenChange={setIsSkillDialogOpen}>
-              <DialogContent className="sm:max-w-[550px]">
+              <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>{currentSkill?.id ? "Edit Skill" : "Add New Skill"}</DialogTitle>
                   <DialogDescription>
-                    {currentSkill?.id ? "Update the details of your skill." : "Add details about your skill."}
+                    {currentSkill?.id
+                      ? "Update the details of your skill."
+                      : "Add details about your technical or personal skill."}
                   </DialogDescription>
                 </DialogHeader>
 
@@ -2166,8 +2170,8 @@ export default function AdminPage() {
                     <Label htmlFor="type">Skill Type</Label>
                     <Select
                       value={currentSkill?.type || "technical"}
-                      onValueChange={(value: "technical" | "personal") =>
-                        setCurrentSkill((prev) => (prev ? { ...prev, type: value } : null))
+                      onValueChange={(value) =>
+                        setCurrentSkill((prev) => (prev ? { ...prev, type: value as "technical" | "personal" } : null))
                       }
                     >
                       <SelectTrigger>
@@ -2183,16 +2187,21 @@ export default function AdminPage() {
                   {currentSkill?.type === "technical" && (
                     <div className="space-y-2">
                       <Label htmlFor="level">Proficiency Level (%)</Label>
-                      <Input
-                        id="level"
-                        type="number"
-                        min="1"
-                        max="100"
-                        value={currentSkill?.level || 80}
-                        onChange={(e) =>
-                          setCurrentSkill((prev) => (prev ? { ...prev, level: Number.parseInt(e.target.value) } : null))
-                        }
-                      />
+                      <div className="flex items-center space-x-2">
+                        <Input
+                          id="level"
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={currentSkill?.level || 80}
+                          onChange={(e) =>
+                            setCurrentSkill((prev) =>
+                              prev ? { ...prev, level: Number.parseInt(e.target.value) } : null,
+                            )
+                          }
+                        />
+                        <span>%</span>
+                      </div>
                     </div>
                   )}
 
@@ -2206,21 +2215,15 @@ export default function AdminPage() {
                         <SelectValue placeholder="Select icon" />
                       </SelectTrigger>
                       <SelectContent>
-                        {currentSkill?.type === "technical" ? (
-                          <>
-                            <SelectItem value="FileSpreadsheet">Spreadsheet</SelectItem>
-                            <SelectItem value="LineChart">Chart</SelectItem>
-                            <SelectItem value="Microscope">Microscope</SelectItem>
-                            <SelectItem value="Stethoscope">Stethoscope</SelectItem>
-                            <SelectItem value="Star">Star</SelectItem>
-                          </>
-                        ) : (
-                          <>
-                            <SelectItem value="BookOpen">Book</SelectItem>
-                            <SelectItem value="Users">People</SelectItem>
-                            <SelectItem value="Star">Star</SelectItem>
-                          </>
-                        )}
+                        <SelectItem value="Star">Star</SelectItem>
+                        <SelectItem value="FileSpreadsheet">Spreadsheet</SelectItem>
+                        <SelectItem value="LineChart">Chart</SelectItem>
+                        <SelectItem value="Microscope">Microscope</SelectItem>
+                        <SelectItem value="Stethoscope">Stethoscope</SelectItem>
+                        <SelectItem value="BookOpen">Book</SelectItem>
+                        <SelectItem value="Users">Users</SelectItem>
+                        <SelectItem value="Clock">Clock</SelectItem>
+                        <SelectItem value="Brain">Brain</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -2230,7 +2233,6 @@ export default function AdminPage() {
                   <Button variant="outline" onClick={() => setIsSkillDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <Button onClick={() => setIsSkillDialogOpen(false)}>Cancel</Button>
                   <Button onClick={handleSaveSkill} disabled={isSaving}>
                     {isSaving ? "Saving..." : "Save"}
                   </Button>
@@ -2242,14 +2244,19 @@ export default function AdminPage() {
           {/* Blog Tab */}
           <TabsContent value="blog">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
                 <div>
                   <CardTitle>Blog Management</CardTitle>
-                  <CardDescription>Create, edit, and manage your blog posts</CardDescription>
+                  <CardDescription>Add, edit, or remove blog posts</CardDescription>
                 </div>
-                <Button onClick={openNewBlogPostDialog} className="flex items-center gap-1">
-                  <Plus className="h-4 w-4" /> Add Blog Post
-                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={refreshCurrentSection}>
+                    <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+                  </Button>
+                  <Button onClick={openNewBlogPostDialog} className="flex items-center gap-1">
+                    <Plus className="h-4 w-4" /> Add
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 {blogLoading ? (
@@ -2278,53 +2285,51 @@ export default function AdminPage() {
                 ) : blogPosts.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">No blog posts added yet.</div>
                 ) : (
-                  <div className="border rounded-lg overflow-hidden">
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead className="bg-muted">
-                          <tr>
-                            <th className="px-4 py-2 text-left">Title</th>
-                            <th className="px-4 py-2 text-left">Date</th>
-                            <th className="px-4 py-2 text-left">Status</th>
-                            <th className="px-4 py-2 text-left">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {blogPosts.map((post) => (
-                            <tr key={post.id} className="border-t">
-                              <td className="px-4 py-2">{post.title}</td>
-                              <td className="px-4 py-2">
-                                {post.date instanceof Date
-                                  ? post.date.toLocaleDateString()
-                                  : typeof post.date === "string"
-                                    ? new Date(post.date).toLocaleDateString()
-                                    : post.date?.toDate().toLocaleDateString()}
-                              </td>
-                              <td className="px-4 py-2">
-                                <Badge variant={post.published ? "default" : "outline"}>
-                                  {post.published ? "Published" : "Draft"}
-                                </Badge>
-                              </td>
-                              <td className="px-4 py-2">
-                                <div className="flex space-x-2">
-                                  <Button variant="outline" size="sm" onClick={() => openEditBlogPostDialog(post)}>
-                                    <Edit className="h-4 w-4 mr-1" /> Edit
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="text-destructive"
-                                    onClick={() => handleDeleteBlogPost(post.id!)}
-                                  >
-                                    <Trash className="h-4 w-4 mr-1" /> Delete
-                                  </Button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                  <div className="space-y-4">
+                    {blogPosts.map((post) => (
+                      <Card key={post.id} className="overflow-hidden hover:shadow-md transition-shadow">
+                        <CardContent className="p-0">
+                          <div className="flex flex-col sm:flex-row">
+                            <div className="sm:w-1/4 h-40 sm:h-auto relative">
+                              <img
+                                src={post.imageUrl || "/placeholder.svg?height=200&width=200"}
+                                alt={post.title}
+                                className="w-full h-full object-cover"
+                              />
+                              {!post.published && <Badge className="absolute top-2 right-2 bg-yellow-500">Draft</Badge>}
+                            </div>
+                            <div className="p-4 sm:p-6 flex-1">
+                              <h3 className="font-bold text-xl mb-2">{post.title}</h3>
+                              <div className="flex items-center text-sm text-muted-foreground mb-3">
+                                <Calendar className="h-4 w-4 mr-1" />
+                                <span>{formatDate(post.date)}</span>
+                                <span className="mx-2">•</span>
+                                <span>{post.author}</span>
+                              </div>
+                              <p className="text-muted-foreground mb-4">{post.excerpt}</p>
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="flex items-center gap-1"
+                                  onClick={() => openEditBlogPostDialog(post)}
+                                >
+                                  <Edit className="h-4 w-4" /> Edit
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="flex items-center gap-1 text-destructive"
+                                  onClick={() => handleDeleteBlogPost(post.id!)}
+                                >
+                                  <Trash className="h-4 w-4" /> Delete
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
                   </div>
                 )}
               </CardContent>
@@ -2338,7 +2343,7 @@ export default function AdminPage() {
                   <DialogDescription>
                     {currentBlogPost?.id
                       ? "Update the details of your blog post."
-                      : "Add details about your blog post."}
+                      : "Add details about your new blog post."}
                   </DialogDescription>
                 </DialogHeader>
 
@@ -2349,7 +2354,7 @@ export default function AdminPage() {
                       id="title"
                       value={currentBlogPost?.title || ""}
                       onChange={(e) => setCurrentBlogPost((prev) => (prev ? { ...prev, title: e.target.value } : null))}
-                      placeholder="e.g. Respiratory Viruses in Children"
+                      placeholder="e.g. Respiratory Viruses in Children: Current Trends and Challenges"
                     />
                   </div>
 
@@ -2357,12 +2362,12 @@ export default function AdminPage() {
                     <Label htmlFor="excerpt">Excerpt</Label>
                     <Textarea
                       id="excerpt"
-                      rows={2}
                       value={currentBlogPost?.excerpt || ""}
                       onChange={(e) =>
                         setCurrentBlogPost((prev) => (prev ? { ...prev, excerpt: e.target.value } : null))
                       }
-                      placeholder="Brief summary of the blog post"
+                      placeholder="A brief summary of your blog post..."
+                      rows={2}
                     />
                   </div>
 
@@ -2370,59 +2375,41 @@ export default function AdminPage() {
                     <Label htmlFor="content">Content</Label>
                     <Textarea
                       id="content"
-                      rows={10}
                       value={richText}
                       onChange={(e) => setRichText(e.target.value)}
-                      placeholder="Write your blog post content here... HTML formatting is supported."
-                      className="min-h-[200px]"
+                      placeholder="Write your blog post content here..."
+                      rows={10}
                     />
                     <p className="text-xs text-muted-foreground">
-                      HTML formatting is supported (e.g., &lt;b&gt;bold&lt;/b&gt;, &lt;i&gt;italic&lt;/i&gt;,
-                      &lt;ul&gt;&lt;li&gt;list items&lt;/li&gt;&lt;/ul&gt;)
+                      HTML formatting is supported (e.g., &lt;h2&gt;Heading&lt;/h2&gt;, &lt;p&gt;Paragraph&lt;/p&gt;,
+                      &lt;ul&gt;&lt;li&gt;List items&lt;/li&gt;&lt;/ul&gt;)
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="author">Author</Label>
-                      <Input
-                        id="author"
-                        value={currentBlogPost?.author || "Dr. Saugat Bhandari"}
-                        onChange={(e) =>
-                          setCurrentBlogPost((prev) => (prev ? { ...prev, author: e.target.value } : null))
-                        }
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="published">Status</Label>
-                      <Select
-                        value={currentBlogPost?.published ? "published" : "draft"}
-                        onChange={(value) =>
-                          setCurrentBlogPost((prev) => (prev ? { ...prev, published: value === "published" } : null))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="published">Published</SelectItem>
-                          <SelectItem value="draft">Draft</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="author">Author</Label>
+                    <Input
+                      id="author"
+                      value={currentBlogPost?.author || ""}
+                      onChange={(e) =>
+                        setCurrentBlogPost((prev) => (prev ? { ...prev, author: e.target.value } : null))
+                      }
+                      placeholder="e.g. Dr. Saugat Bhandari"
+                    />
                   </div>
 
                   <div className="space-y-2">
                     <Label>Featured Image</Label>
                     <div className="flex flex-col items-center p-4 border-2 border-dashed rounded-md">
-                      <div className="relative w-full h-40 mb-4 overflow-hidden rounded-md">
-                        <img
-                          src={currentBlogPost?.imageUrl || "/placeholder.svg?height=200&width=400"}
-                          alt="Blog Featured Image"
-                          className="object-cover w-full h-full"
-                        />
-                      </div>
+                      {currentBlogPost?.imageUrl && (
+                        <div className="relative w-full h-48 mb-4 overflow-hidden rounded-md">
+                          <img
+                            src={currentBlogPost.imageUrl || "/placeholder.svg"}
+                            alt="Featured"
+                            className="object-cover w-full h-full"
+                          />
+                        </div>
+                      )}
                       <Button
                         variant="outline"
                         onClick={() => fileInputRef.current?.click()}
@@ -2437,8 +2424,25 @@ export default function AdminPage() {
                         onChange={handleBlogImageUpload}
                         className="hidden"
                       />
-                      <p className="mt-2 text-sm text-muted-foreground">Recommended size: 1200x600 pixels</p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        Recommended size: 1200x630 pixels (16:9 ratio)
+                      </p>
                     </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <Label htmlFor="published" className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        id="published"
+                        checked={currentBlogPost?.published || false}
+                        onChange={(e) =>
+                          setCurrentBlogPost((prev) => (prev ? { ...prev, published: e.target.checked } : null))
+                        }
+                        className="rounded border-gray-300 text-primary focus:ring-primary"
+                      />
+                      <span>Publish this post</span>
+                    </Label>
                   </div>
                 </div>
 
@@ -2447,15 +2451,316 @@ export default function AdminPage() {
                     Cancel
                   </Button>
                   <Button onClick={handleSaveBlogPost} disabled={isSaving}>
-                    {isSaving ? "Saving..." : "Save"}
+                    {isSaving ? "Saving..." : currentBlogPost?.id ? "Update" : "Create"}
                   </Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+          </TabsContent>
+
+          {/* Settings Tab */}
+          <TabsContent value="settings">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
+                <div>
+                  <CardTitle>Site Settings</CardTitle>
+                  <CardDescription>Control which sections are visible on your website</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={refreshCurrentSection}>
+                  <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {sectionVisibilityLoading ? (
+                  <div className="flex justify-center py-8">
+                    <svg
+                      className="animate-spin h-8 w-8 text-primary"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-6">
+                      <div className="grid gap-6 sm:grid-cols-2">
+                        <Card className="border shadow-sm">
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-lg">Section Visibility</CardTitle>
+                            <CardDescription>Toggle sections to show or hide them on your website</CardDescription>
+                          </CardHeader>
+                          <CardContent className="space-y-4 pt-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <div className="p-2 rounded-full bg-primary/10">
+                                  {sectionVisibility.hero ? (
+                                    <Eye className="h-4 w-4 text-primary" />
+                                  ) : (
+                                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                  )}
+                                </div>
+                                <Label htmlFor="hero-visibility" className="font-medium">
+                                  Hero Section
+                                </Label>
+                              </div>
+                              <Switch
+                                id="hero-visibility"
+                                checked={sectionVisibility.hero}
+                                onCheckedChange={(checked) =>
+                                  setSectionVisibility((prev) => ({ ...prev, hero: checked }))
+                                }
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <div className="p-2 rounded-full bg-primary/10">
+                                  {sectionVisibility.about ? (
+                                    <Eye className="h-4 w-4 text-primary" />
+                                  ) : (
+                                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                  )}
+                                </div>
+                                <Label htmlFor="about-visibility" className="font-medium">
+                                  About Section
+                                </Label>
+                              </div>
+                              <Switch
+                                id="about-visibility"
+                                checked={sectionVisibility.about}
+                                onCheckedChange={(checked) =>
+                                  setSectionVisibility((prev) => ({ ...prev, about: checked }))
+                                }
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <div className="p-2 rounded-full bg-primary/10">
+                                  {sectionVisibility.experience ? (
+                                    <Eye className="h-4 w-4 text-primary" />
+                                  ) : (
+                                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                  )}
+                                </div>
+                                <Label htmlFor="experience-visibility" className="font-medium">
+                                  Experience Section
+                                </Label>
+                              </div>
+                              <Switch
+                                id="experience-visibility"
+                                checked={sectionVisibility.experience}
+                                onCheckedChange={(checked) =>
+                                  setSectionVisibility((prev) => ({ ...prev, experience: checked }))
+                                }
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <div className="p-2 rounded-full bg-primary/10">
+                                  {sectionVisibility.education ? (
+                                    <Eye className="h-4 w-4 text-primary" />
+                                  ) : (
+                                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                  )}
+                                </div>
+                                <Label htmlFor="education-visibility" className="font-medium">
+                                  Education Section
+                                </Label>
+                              </div>
+                              <Switch
+                                id="education-visibility"
+                                checked={sectionVisibility.education}
+                                onCheckedChange={(checked) =>
+                                  setSectionVisibility((prev) => ({ ...prev, education: checked }))
+                                }
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <div className="p-2 rounded-full bg-primary/10">
+                                  {sectionVisibility.publications ? (
+                                    <Eye className="h-4 w-4 text-primary" />
+                                  ) : (
+                                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                  )}
+                                </div>
+                                <Label htmlFor="publications-visibility" className="font-medium">
+                                  Publications Section
+                                </Label>
+                              </div>
+                              <Switch
+                                id="publications-visibility"
+                                checked={sectionVisibility.publications}
+                                onCheckedChange={(checked) =>
+                                  setSectionVisibility((prev) => ({ ...prev, publications: checked }))
+                                }
+                              />
+                            </div>
+                          </CardContent>
+                        </Card>
+
+                        <Card className="border shadow-sm">
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-lg">More Sections</CardTitle>
+                            <CardDescription>Control visibility of additional sections</CardDescription>
+                          </CardHeader>
+                          <CardContent className="space-y-4 pt-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <div className="p-2 rounded-full bg-primary/10">
+                                  {sectionVisibility.trainings ? (
+                                    <Eye className="h-4 w-4 text-primary" />
+                                  ) : (
+                                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                  )}
+                                </div>
+                                <Label htmlFor="trainings-visibility" className="font-medium">
+                                  Trainings Section
+                                </Label>
+                              </div>
+                              <Switch
+                                id="trainings-visibility"
+                                checked={sectionVisibility.trainings}
+                                onCheckedChange={(checked) =>
+                                  setSectionVisibility((prev) => ({ ...prev, trainings: checked }))
+                                }
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <div className="p-2 rounded-full bg-primary/10">
+                                  {sectionVisibility.skills ? (
+                                    <Eye className="h-4 w-4 text-primary" />
+                                  ) : (
+                                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                  )}
+                                </div>
+                                <Label htmlFor="skills-visibility" className="font-medium">
+                                  Skills Section
+                                </Label>
+                              </div>
+                              <Switch
+                                id="skills-visibility"
+                                checked={sectionVisibility.skills}
+                                onCheckedChange={(checked) =>
+                                  setSectionVisibility((prev) => ({ ...prev, skills: checked }))
+                                }
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <div className="p-2 rounded-full bg-primary/10">
+                                  {sectionVisibility.blog ? (
+                                    <Eye className="h-4 w-4 text-primary" />
+                                  ) : (
+                                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                  )}
+                                </div>
+                                <Label htmlFor="blog-visibility" className="font-medium">
+                                  Blog Section
+                                </Label>
+                              </div>
+                              <Switch
+                                id="blog-visibility"
+                                checked={sectionVisibility.blog}
+                                onCheckedChange={(checked) =>
+                                  setSectionVisibility((prev) => ({ ...prev, blog: checked }))
+                                }
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <div className="p-2 rounded-full bg-primary/10">
+                                  {sectionVisibility.contact ? (
+                                    <Eye className="h-4 w-4 text-primary" />
+                                  ) : (
+                                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                  )}
+                                </div>
+                                <Label htmlFor="contact-visibility" className="font-medium">
+                                  Contact Section
+                                </Label>
+                              </div>
+                              <Switch
+                                id="contact-visibility"
+                                checked={sectionVisibility.contact}
+                                onCheckedChange={(checked) =>
+                                  setSectionVisibility((prev) => ({ ...prev, contact: checked }))
+                                }
+                              />
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+
+                      <Alert className="bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
+                        <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                        <AlertTitle>Important</AlertTitle>
+                        <AlertDescription>
+                          Changes to section visibility will be immediately reflected on your website. The Hero section
+                          is recommended to remain visible.
+                        </AlertDescription>
+                      </Alert>
+
+                      <Button onClick={handleSaveSectionVisibility} disabled={isSaving} className="w-full sm:w-auto">
+                        {isSaving ? (
+                          <span className="flex items-center">
+                            <svg
+                              className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                              xmlns="http://www.w3.org/2000/svg"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                              ></circle>
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                              ></path>
+                            </svg>
+                            Saving...
+                          </span>
+                        ) : (
+                          <span className="flex items-center">
+                            <Save className="mr-2 h-4 w-4" /> Save Settings
+                          </span>
+                        )}
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>
     </div>
   )
 }
-
